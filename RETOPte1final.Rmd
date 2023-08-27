@@ -1,0 +1,199 @@
+---
+title: "RetoEtapa2"
+author: "Adalía Fernanda Aneiros Gutiérrez"
+date: "2023-08-18"
+output: html_document
+---
+
+Primeramente, se importa la librería que permite leer archivos de excel .xlsx
+```{r}
+library(readxl)
+NO2 = read.csv("NO2.csv")
+
+chars <- sapply(NO2, is.character)
+NO2[ , chars] <- as.data.frame(apply(NO2[ , chars], 2, as.numeric))
+NO2 <- cbind(NO2[2:9],NO2[11:16])
+```
+Este mensaje de error se debe a la falta de valores en algunas columnas de la base de datos. Sin embargo, esto no es nada de qué preocuparse.
+
+
+Antes de realizar la comprensión de los datos del negocio, es importante comprender las variables con las que estaremos trabajando. Sobre todo para poder manipularlas.
+```{r}
+
+head(NO2)
+
+```
+
+
+#### Dimensión del dataset:
+
+```{r}
+data.frame(dim(NO2), row.names =c(" No. registros", "No. columnas"))
+```
+
+#### Descripción de variables:
+
+```{r}
+str(NO2)
+```
+
+### Comprensión de los datos del negocio:
+
+Declaramos una función de limpieza para después correrla sobre nuestro dataframe de datos originales para asignar los datos a uno nuevo. Esta función transforma todos los datos a numéricos y omite los valores NA del dataframe.
+```{r}
+
+library(dplyr)
+limpieza = function(m){
+  m1 = m[-1]
+  m2 = m1 %>%
+    mutate_all(as.numeric)
+  m3 = na.omit(m2)
+  return(m3)
+}
+
+NO2_l = limpieza(NO2)
+head(NO2_l)
+```
+
+Se verifica la cantidad de NAs que había en cada una de las columnas del dataframe original
+```{r}
+# Cantidad de valores NA
+na = NO2 %>%
+  mutate_all(as.numeric)
+
+data.frame(colSums(is.na(na)))
+```
+
+
+```{r}
+Mode <- function(x) {
+  uniq_x <- unique(x)
+  uniq_x[which.max(tabulate(match(x, uniq_x)))]
+}
+
+# Calcular las modas para cada variable en el DataFrame
+modas <- sapply(NO2, Mode)
+modas
+```
+
+###   Cálculo de medidas estadísticas
+
+Declaramos una función que calcula el valor de la media, mediana, moda, rango, varianzas, desviaciones estándar y las asigna a un nuevo dataframe.
+```{r}
+
+library(DescTools)
+
+estadisticos = function(m){
+  medias = colMeans(m)
+  medianas = sapply(m, median)
+  moda = sapply(m, mode)
+  rango = sapply(m, function(x) max(x) - min(x))
+  var = sapply(m, var)
+  sd = sapply(m, sd)
+  df_est = data.frame(moda, medias, medianas, rango, var, sd)
+  return(df_est)             
+}
+
+estadisticos(NO2_l)
+```
+
+
+###   Exploración de datos mediante herramientas de visualización
+
+Se genera un histograma de cada una de las variables del dataframe limpio.
+```{r}
+
+visual = function(m){
+  boxplot(m, main = "Cuartiles por columna", ylab = "Valores", outline = FALSE)
+  sapply(m, hist)
+  cor(m)
+}
+visual(NO2_l)
+
+
+```
+###Correlación
+
+Se genera un mapa de calor de las correlaciones entre las columnas.
+```{r}
+C <- cor(NO2_l)
+heatmap(C, Rowv = NA, Colv = NA)
+```
+
+Como se puede observar en el gráfico, existe una gran correlación entre las variables NO, NO2 y NOX entre sí, así como una correlación moderada entre PM10 y PM2.5; y WRS, TOUT y O3.
+Debido a esto, se eliminarán del set de datos porque ya hay otras variables que explican los datos mayormente necesarios.
+
+```{r}
+
+erase = c("NO", "SO2", "PM2.5")
+NO2_f = NO2_l[, !(names(NO2_l) %in% erase)]
+NO2_f
+C <- cor(NO2_f)
+heatmap(C, Rowv = NA, Colv = NA)
+
+```
+
+```{r}
+cor(NO2_l)
+```
+
+
+
+## Preparación de los datos:
+
+
+Justificación: se excluyeron los datos de las columnas...
+
+Las columnas objetivo son..
+
+#### Limpieza de datos faltante:
+
+
+```{r}
+NO2_d = subset(NO2_f, !duplicated(NO2_f))
+NO2_d
+```
+
+## Transformación de datos:
+
+
+Declaramos una función que servirá para reemplazar los outliers por datos NA. Separa los datos por cuantiles y reemplaza los valores que están fuera del rango por NAs.
+Cabe destacar que esta función necesita utilizar la librería, que fue declarada anteriormente.
+```{r}
+
+replace_outliers <- function(x) {
+  q <- quantile(x, probs = c(0.25, 0.75), na.rm = TRUE)
+  iqr <- q[2] - q[1]
+  lower_bound <- q[1] - 1.5 * iqr
+  upper_bound <- q[2] + 1.5 * iqr
+  x[x < lower_bound | x > upper_bound] <- NA
+  return(x)
+}
+```
+
+
+```{r}
+# Define los intervalos y etiquetas para el binning
+intervalos <- c(0, 10, 20, 30, 40, 50)
+etiquetas <- c("Intervalo 1", "Intervalo 2", "Intervalo 3", "Intervalo 4", "Intervalo 5")
+
+# Aplica la limpieza de outliers a todas las columnas numéricas en el dataframe
+df_cleaned = limpieza(replace_outliers(NO2_d) %>% select(-PRS))
+#df_cleaned = df %>% mutate(across(where(is.numeric), replace_outliers))
+print(df_cleaned)
+
+# Aplica el binning a todas las columnas numéricas en el dataframe
+df_cleaned <- df_cleaned %>%
+  mutate(across(where(is.numeric), 
+                list(categorias = ~ cut(.,
+                                         breaks = intervalos,
+                                         labels = etiquetas,
+                                         include.lowest = TRUE))))
+print(df_cleaned)
+write.csv(df_cleaned, "NO2_final.csv")
+```
+
+Se tuvo que remover la columna PRS debido a que la función de outliers removía todos los datos de esta columna, por lo que al eliminar las filas con NA se eliminaban todos los datos.
+Sin contar ese detalle, se redujo el tamaño del dataframe de 8,119 filas a 6,600.
+
+
